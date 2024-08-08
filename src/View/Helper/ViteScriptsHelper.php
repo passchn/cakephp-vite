@@ -160,14 +160,33 @@ class ViteScriptsHelper extends Helper
         $pluginPrefix = $config->read('plugin');
         $pluginPrefix = $pluginPrefix ? $pluginPrefix . '.' : null;
 
-        $records = $this->getFilteredRecords(ViteManifest::getRecords($config), $options);
+        $manifestRecords = ViteManifest::getRecords($config);
+
+        $entryRecords = $this->getFilteredRecords($manifestRecords, $options);
+        // check chunk.imports
+        $shouldImports = $entryRecords->reduce(
+            static function (array $carry, ManifestRecord $record) {
+                $imports = $record->getChunk('imports') ?? [];
+
+                return array_merge($carry, $imports);
+            },
+            []
+        );
+        // add chunk.imports files to prodFilter
+        if (is_array($options['prodFilter'])) {
+            $options['prodFilter'] = array_merge($options['prodFilter'], $shouldImports);
+        }
+
+        $manifestRecords->rewind();
+        $records = $this->getFilteredRecords($manifestRecords, $options);
         $cssBlock = $options['cssBlock'];
         unset($options['prodFilter']);
         unset($options['cssBlock']);
         unset($options['devEntries']);
 
         foreach ($records as $record) {
-            if (!$record->isEntryScript()) {
+            /** @var \ViteHelper\Utilities\ManifestRecord $record */
+            if (!$record->isEntryScript() && !in_array($record->getKey(), $shouldImports, true)) {
                 continue;
             }
 
@@ -333,7 +352,7 @@ class ViteScriptsHelper extends Helper
         return $records->filter(function (ManifestRecord $record) use ($filter) {
             foreach ($filter as $property => $file) {
                 $property = is_string($property) ? $property : 'src';
-                if ($record->match($file, $property)) {
+                if ($record->match($file, $property) || $record->getKey() === $file) {
                     return true;
                 }
             }
